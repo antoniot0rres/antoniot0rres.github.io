@@ -1,0 +1,444 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="description" content="António Torres">
+<title>António Torres</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500&family=Hanken+Grotesk:wght@400;500&display=swap">
+<style>
+  /* Layout: one full-bleed photograph as a "window"; name and menu sit quietly on a thin top scrim. */
+  :root {
+    --bg: #0e0f0d;
+    --ink: #f4f3ef;
+    --ink-dim: rgba(244, 243, 239, 0.72);
+    --scrim: rgba(10, 11, 9, 0.38);
+    --panel: rgba(14, 15, 13, 0.58);
+    --line: rgba(244, 243, 239, 0.22);
+    --icon: rgba(226, 225, 220, 0.82);
+    --f-name: "Newsreader", "Iowan Old Style", Georgia, serif;
+    --f-ui: "Hanken Grotesk", "Helvetica Neue", Arial, sans-serif;
+    --gutter: clamp(16px, 3vw, 36px);
+    color-scheme: dark;
+  }
+  html, body { height: 100%; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--f-ui);
+    overflow: hidden;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  #stage, #fallback {
+    position: fixed; inset: 0;
+    width: 100%; height: 100%;
+    display: block;
+    touch-action: none;
+  }
+  #stage { opacity: 0; transition: opacity 900ms ease; }
+  #stage.ready { opacity: 1; }
+  #fallback { background: var(--bg) center / cover no-repeat; }
+
+  .scrim {
+    position: fixed; left: 0; right: 0; top: 0;
+    height: calc(140px + env(safe-area-inset-top, 0px));
+    background: linear-gradient(to bottom, var(--scrim), transparent);
+    pointer-events: none;
+  }
+
+  header {
+    position: fixed; left: 0; right: 0; top: 0;
+    padding: calc(env(safe-area-inset-top, 0px) + var(--gutter)) var(--gutter) 0;
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+    gap: 10px 24px;
+    text-shadow: 0 1px 12px rgba(0, 0, 0, 0.35);
+    pointer-events: none;
+  }
+  header > * { pointer-events: auto; }
+
+  .name {
+    margin: 0;
+    font-family: var(--f-name);
+    font-weight: 400;
+    font-size: clamp(1.25rem, 1rem + 0.9vw, 1.6rem);
+    letter-spacing: 0.005em;
+    line-height: 1.1;
+  }
+
+  nav ul {
+    list-style: none; margin: 0; padding: 0;
+    display: flex; flex-wrap: wrap; align-items: center;
+    gap: 4px clamp(16px, 2.2vw, 26px);
+  }
+  nav li { display: flex; align-items: center; }
+  nav li:first-child { margin-right: clamp(4px, 1vw, 10px); }
+
+  /* Logos are masks filled with a token colour: all the same grey, white on hover. */
+  .icon-link {
+    display: inline-flex; align-items: center; justify-content: center;
+    min-width: 28px; height: 28px;
+    border-bottom: 0 !important;
+  }
+  .mark {
+    display: block;
+    background-color: var(--icon);
+    -webkit-mask: var(--src) center / contain no-repeat;
+    mask: var(--src) center / contain no-repeat;
+    filter: drop-shadow(0 1px 5px rgba(0, 0, 0, 0.35));
+    transition: background-color 200ms ease, transform 200ms ease;
+  }
+  .icon-link:hover .mark, .icon-link:focus-visible .mark {
+    background-color: var(--ink);
+    transform: translateY(-1px);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    .icon-link:hover .mark, .icon-link:focus-visible .mark { transform: none; }
+  }
+  nav a, nav button {
+    font: 500 0.75rem/1 var(--f-ui);
+    letter-spacing: 0.12em;
+    text-transform: uppercase;
+    color: var(--ink-dim);
+    background: none; border: 0; padding: 6px 0; cursor: pointer;
+    text-decoration: none;
+    border-bottom: 1px solid transparent;
+    transition: color 200ms ease, border-color 200ms ease;
+  }
+  nav a:hover, nav button:hover, nav button[aria-expanded="true"] {
+    color: var(--ink); border-bottom-color: var(--line);
+  }
+  nav a:focus-visible, nav button:focus-visible, .close:focus-visible {
+    outline: 1px solid var(--ink); outline-offset: 4px; border-radius: 1px;
+  }
+
+  #about {
+    position: fixed;
+    left: var(--gutter);
+    bottom: calc(env(safe-area-inset-bottom, 0px) + var(--gutter));
+    max-width: min(360px, calc(100% - 2 * var(--gutter)));
+    padding: 20px 22px 18px;
+    background: var(--panel);
+    -webkit-backdrop-filter: blur(14px) saturate(1.1);
+    backdrop-filter: blur(14px) saturate(1.1);
+    border: 1px solid var(--line);
+    border-radius: 2px;
+    display: grid; gap: 10px;
+  }
+  #about h2 {
+    margin: 0;
+    font: 500 0.7rem/1 var(--f-ui);
+    letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--ink-dim);
+  }
+  #about p {
+    margin: 0;
+    font-family: var(--f-name);
+    font-size: 1.05rem; line-height: 1.5;
+    text-wrap: pretty;
+  }
+  .close {
+    position: absolute; top: 12px; right: 12px;
+    width: 28px; height: 28px;
+    background: none; border: 0; cursor: pointer;
+    color: var(--ink-dim); font: 400 1.1rem/1 var(--f-ui);
+  }
+  .close:hover { color: var(--ink); }
+
+  #loading {
+    position: fixed; right: var(--gutter);
+    bottom: calc(env(safe-area-inset-bottom, 0px) + var(--gutter));
+    font: 500 0.7rem/1 var(--f-ui); letter-spacing: 0.14em; text-transform: uppercase;
+    color: var(--ink-dim);
+  }
+
+  @media (max-width: 480px) {
+    nav a, nav button { font-size: 0.7rem; letter-spacing: 0.1em; }
+  }
+</style>
+</head>
+<body>
+
+
+<div id="fallback" hidden></div>
+<canvas id="stage" aria-label="Photograph of a living room opening onto a balcony and green hillside"></canvas>
+<div class="scrim"></div>
+
+<header>
+  <h1 class="name" id="site-name">António Torres</h1>
+  <nav aria-label="Main">
+    <ul>
+      <li><button type="button" id="about-btn" aria-expanded="false" aria-controls="about">About</button></li>
+    </ul>
+  </nav>
+</header>
+
+<section id="about" hidden aria-labelledby="about-title">
+  <button type="button" class="close" id="about-close" aria-label="Close">&times;</button>
+  <h2 id="about-title">About</h2>
+  <p id="about-text"></p>
+</section>
+
+<div id="loading">Loading</div>
+
+<script>
+/* ================= CONFIG: edit here ================= */
+const CONFIG = {
+  image: "image.jpg",        // the photograph
+  depth: "depth.png",        // matching depth map: white = near, black = far
+  imageAlt: "Photograph of a living room opening onto a balcony and green hillside",
+  about: "Senior QA Engineer. Coimbra, Portugal.",
+  // Menu links, shown after "About" in this order
+  // icon: white-on-transparent PNG/SVG used as a mask, so the colour comes from the CSS
+  // size: icon height in px, tuned so the four marks look the same visual weight
+  links: [
+    { label: "LinkedIn",    url: "https://www.linkedin.com/in/antoniot0rres/", icon: "icon-linkedin.png",   size: 17 },
+    { label: "Instagram",   url: "https://www.instagram.com/antoniot0rres/",   icon: "icon-instagram.png",  size: 17 },
+    { label: "Erro Crasso", url: "https://errocrasso.cc/",                     icon: "icon-errocrasso.png", size: 12 },
+    { label: "allroutes",   url: "https://allroutes.app/",                     icon: "icon-allroutes.png",  size: 19 }
+  ],
+  strength: 0.034,           // effect intensity (0.02 subtle, 0.034 strong, 0.05 heavy)
+  focus: 0.55,               // depth that stays still (the window frame plane)
+  verticalRatio: 0.55,       // vertical movement relative to horizontal
+  idleDrift: true            // gentle motion when nobody touches the mouse
+};
+/* ===================================================== */
+
+document.getElementById("about-text").textContent = CONFIG.about;
+(() => {
+  const ul = document.querySelector("nav ul");
+  for (const { label, url, icon, size } of CONFIG.links) {
+    const li = document.createElement("li");
+    const a = document.createElement("a");
+    a.href = url; a.target = "_blank"; a.rel = "noopener";
+    a.className = "icon-link";
+    a.setAttribute("aria-label", label);
+    a.title = label;
+    const mark = document.createElement("span");
+    mark.className = "mark";
+    mark.setAttribute("aria-hidden", "true");
+    mark.style.height = size + "px";
+    mark.style.setProperty("--src", `url("${icon}")`);
+    // Width follows the icon's own proportions once its size is known.
+    const probe = new Image();
+    probe.onload = () => { mark.style.width = (size * probe.naturalWidth / probe.naturalHeight) + "px"; };
+    probe.src = icon;
+    mark.style.width = size + "px";
+    a.appendChild(mark);
+    li.appendChild(a);
+    ul.appendChild(li);
+  }
+})();
+document.getElementById("stage").setAttribute("aria-label", CONFIG.imageAlt);
+
+/* About panel */
+(() => {
+  const btn = document.getElementById("about-btn");
+  const panel = document.getElementById("about");
+  const close = document.getElementById("about-close");
+  const set = (open) => {
+    panel.hidden = !open;
+    btn.setAttribute("aria-expanded", String(open));
+    if (open) close.focus();
+  };
+  btn.addEventListener("click", () => set(panel.hidden));
+  close.addEventListener("click", () => { set(false); btn.focus(); });
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !panel.hidden) { set(false); btn.focus(); } });
+})();
+
+/* Window-parallax renderer */
+(() => {
+  const canvas = document.getElementById("stage");
+  const loading = document.getElementById("loading");
+  const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const gl = canvas.getContext("webgl", { antialias: false, premultipliedAlpha: false });
+
+  const loadImg = (src) => new Promise((res, rej) => {
+    const im = new Image();
+    im.onload = () => res(im);
+    im.onerror = () => rej(new Error("Could not load " + src));
+    im.src = src;
+  });
+
+  const showFallback = () => {
+    const fb = document.getElementById("fallback");
+    fb.style.backgroundImage = `url("${CONFIG.image}")`;
+    fb.hidden = false;
+    canvas.hidden = true;
+    loading.hidden = true;
+  };
+
+  if (!gl) { showFallback(); return; }
+
+  const vs = `
+    attribute vec2 aPos;
+    varying vec2 vUv;
+    void main() { vUv = aPos * 0.5 + 0.5; gl_Position = vec4(aPos, 0.0, 1.0); }`;
+
+  // Parallax occlusion search: walks the depth layers from near to far and keeps the
+  // first surface the view ray hits, so near objects correctly cover what is behind them.
+  const fs = `
+    precision highp float;
+    uniform sampler2D uImg;
+    uniform sampler2D uDepth;
+    uniform vec2 uRes;
+    uniform vec2 uImgSize;
+    uniform vec2 uOffset;
+    uniform float uFocus;
+    uniform float uZoom;
+    varying vec2 vUv;
+    const int STEPS = 44;
+
+    float depthAt(vec2 uv) { return texture2D(uDepth, clamp(uv, 0.001, 0.999)).r; }
+
+    void main() {
+      float ra = uRes.x / uRes.y;
+      float ri = uImgSize.x / uImgSize.y;
+      vec2 s = ra > ri ? vec2(1.0, ri / ra) : vec2(ra / ri, 1.0);
+      vec2 uv = (vUv - 0.5) * s / uZoom + 0.5;
+
+      float stepL = 1.0 / float(STEPS);
+      vec2 prevUv = uv - uOffset * (1.0 - uFocus);
+      float prevL = 1.0;
+      float prevD = depthAt(prevUv);
+      vec2 hit = uv + uOffset * uFocus;
+
+      for (int i = 0; i <= STEPS; i++) {
+        float L = 1.0 - float(i) * stepL;
+        vec2 c = uv - uOffset * (L - uFocus);
+        float d = depthAt(c);
+        if (d >= L) {
+          if (i == 0) { hit = c; }
+          else {
+            float a = prevD - prevL;
+            float b = d - L;
+            hit = mix(prevUv, c, clamp(a / (a - b), 0.0, 1.0));
+          }
+          break;
+        }
+        prevUv = c; prevL = L; prevD = d;
+      }
+      gl_FragColor = vec4(texture2D(uImg, clamp(hit, 0.0, 1.0)).rgb, 1.0);
+    }`;
+
+  const compile = (type, src) => {
+    const sh = gl.createShader(type);
+    gl.shaderSource(sh, src);
+    gl.compileShader(sh);
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(sh));
+    return sh;
+  };
+
+  let prog;
+  try {
+    prog = gl.createProgram();
+    gl.attachShader(prog, compile(gl.VERTEX_SHADER, vs));
+    gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, fs));
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
+  } catch (err) { console.error(err); showFallback(); return; }
+  gl.useProgram(prog);
+
+  const buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+  const aPos = gl.getAttribLocation(prog, "aPos");
+  gl.enableVertexAttribArray(aPos);
+  gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
+
+  const U = (n) => gl.getUniformLocation(prog, n);
+  const u = {
+    img: U("uImg"), depth: U("uDepth"), res: U("uRes"), imgSize: U("uImgSize"),
+    offset: U("uOffset"), focus: U("uFocus"), zoom: U("uZoom")
+  };
+
+  const makeTex = (unit, im) => {
+    const t = gl.createTexture();
+    gl.activeTexture(gl.TEXTURE0 + unit);
+    gl.bindTexture(gl.TEXTURE_2D, t);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, im);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
+    return t;
+  };
+
+  const strength = CONFIG.strength * (reduced ? 0.5 : 1);
+  // Zoom in just enough that the shifted image never reveals its edges.
+  const zoom = 1 + strength * 1.35;
+
+  const resize = () => {
+    const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
+    const w = Math.round(canvas.clientWidth * dpr);
+    const h = Math.round(canvas.clientHeight * dpr);
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w; canvas.height = h;
+      gl.viewport(0, 0, w, h);
+    }
+  };
+
+  /* Pointer: position on screen maps to the viewer's eye position in front of the window. */
+  const target = { x: 0, y: 0 };
+  const cur = { x: 0, y: 0 };
+  let lastInput = -1e9;
+
+  const fromEvent = (e) => {
+    target.x = (e.clientX / window.innerWidth) * 2 - 1;
+    target.y = (e.clientY / window.innerHeight) * 2 - 1;
+    lastInput = performance.now();
+  };
+  window.addEventListener("pointermove", fromEvent, { passive: true });
+  window.addEventListener("pointerdown", fromEvent, { passive: true });
+  document.addEventListener("pointerleave", () => { target.x = 0; target.y = 0; });
+  window.addEventListener("blur", () => { target.x = 0; target.y = 0; });
+
+  Promise.all([loadImg(CONFIG.image), loadImg(CONFIG.depth)]).then(([im, dm]) => {
+    makeTex(0, im);
+    makeTex(1, dm);
+    gl.uniform1i(u.img, 0);
+    gl.uniform1i(u.depth, 1);
+    gl.uniform2f(u.imgSize, im.naturalWidth, im.naturalHeight);
+    gl.uniform1f(u.focus, CONFIG.focus);
+    gl.uniform1f(u.zoom, zoom);
+
+    let prev = performance.now();
+    const frame = (now) => {
+      const dt = Math.min((now - prev) / 1000, 0.05);
+      prev = now;
+
+      let tx = target.x, ty = target.y;
+      if (CONFIG.idleDrift && !reduced && now - lastInput > 3500) {
+        const t = now / 1000;
+        tx = Math.sin(t * 0.23) * 0.45;
+        ty = Math.sin(t * 0.17 + 1.3) * 0.25;
+      }
+      // Critically-damped style easing: smooth, no overshoot.
+      const k = 1 - Math.exp(-dt * 4.2);
+      cur.x += (tx - cur.x) * k;
+      cur.y += (ty - cur.y) * k;
+
+      resize();
+      gl.uniform2f(u.res, canvas.width, canvas.height);
+      // Eye moves right -> near objects slide left, far landscape slides right.
+      gl.uniform2f(u.offset, -cur.x * strength, cur.y * strength * CONFIG.verticalRatio);
+      gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
+      requestAnimationFrame(frame);
+    };
+    requestAnimationFrame((t) => {
+      frame(t);
+      canvas.classList.add("ready");
+      loading.hidden = true;
+    });
+  }).catch((err) => {
+    console.error(err);
+    loading.textContent = "Image could not be loaded";
+  });
+})();
+</script>
+
+</body>
+</html>
