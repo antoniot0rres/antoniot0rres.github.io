@@ -188,7 +188,8 @@
 <script>
 /* ================= CONFIG: edit here ================= */
 const CONFIG = {
-  scene: "scene/",           // folder made by tools/build_scene.py from the photo
+  image: "image.jpg",        // the photograph
+  depth: "depth.png",        // matching depth map: white = near, black = far
   imageAlt: "Photograph of a living room opening onto a balcony and green hillside",
   about: "Senior QA Engineer. Coimbra, Portugal.",
   // Menu links, shown after "About" in this order
@@ -200,7 +201,7 @@ const CONFIG = {
     { label: "Erro Crasso", url: "https://errocrasso.cc/",                     icon: "icon-errocrasso.png", size: 12 },
     { label: "allroutes",   url: "https://allroutes.app/",                     icon: "icon-allroutes.png",  size: 19 }
   ],
-  strength: 0.034,           // effect intensity (0.02 subtle, 0.034 strong; scene is built for up to 0.045)
+  strength: 0.034,           // effect intensity (0.02 subtle, 0.034 strong, 0.05 heavy)
   focus: 0.55,               // depth that stays still (the window frame plane)
   verticalRatio: 0.55,       // vertical movement relative to horizontal
   idleDrift: true            // gentle motion when nobody touches the mouse
@@ -249,101 +250,79 @@ document.getElementById("stage").setAttribute("aria-label", CONFIG.imageAlt);
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !panel.hidden) { set(false); btn.focus(); } });
 })();
 
-/* Window-parallax renderer.
-   The scene is a set of planar regions (see tools/build_scene.py). When the eye moves, each region
-   moves as a rigid plane, which is an affine map: straight lines stay straight, nothing bends.
-   Where a near region slides away, the surface hidden behind it is shown from the fill images.
-   A depth buffer makes the nearest surface win at every pixel.
-   Pass 1 draws the regions into an offscreen texture; pass 2 copies it to the screen and closes
-   the sub-pixel seams between neighbouring planes with the colour of the covered pixels around. */
+/* Window-parallax renderer */
 (() => {
   const canvas = document.getElementById("stage");
   const loading = document.getElementById("loading");
   const reduced = matchMedia("(prefers-reduced-motion: reduce)").matches;
-  const base = CONFIG.scene.replace(/\/?$/, "/");
-  const gl = canvas.getContext("webgl", { antialias: false, depth: false, premultipliedAlpha: false });
+  const gl = canvas.getContext("webgl", { antialias: false, premultipliedAlpha: false });
+
+  const loadImg = (src) => new Promise((res, rej) => {
+    const im = new Image();
+    im.onload = () => res(im);
+    im.onerror = () => rej(new Error("Could not load " + src));
+    im.src = src;
+  });
 
   const showFallback = () => {
     const fb = document.getElementById("fallback");
-    fb.style.backgroundImage = `url("${base}image.jpg")`;
+    fb.style.backgroundImage = `url("${CONFIG.image}")`;
     fb.hidden = false;
     canvas.hidden = true;
     loading.hidden = true;
   };
+
   if (!gl) { showFallback(); return; }
 
-  /* ---------- pass 1: planar regions ---------- */
-  const sceneVS = `
-    attribute vec2 aCorner;
-    uniform vec4 uBox;        // region bounding box in source uv (u0, v0, u1, v1), v down
-    uniform vec3 uPlane;      // depth = a*u + b*v + c   (1 = near, 0 = far)
-    uniform vec2 uOffset;     // eye offset in uv units
-    uniform float uFocus;     // depth that does not move
-    uniform vec2 uView;       // cover-fit scale from image uv to screen
-    varying vec2 vSrc;
-    void main() {
-      vec2 s = mix(uBox.xy, uBox.zw, aCorner);
-      float d = dot(uPlane, vec3(s, 1.0));
-      vec2 p = s + uOffset * (d - uFocus);       // affine in s: lines stay lines
-      vec2 scr = (p - 0.5) * uView + 0.5;
-      gl_Position = vec4(scr.x * 2.0 - 1.0, 1.0 - scr.y * 2.0, clamp(0.5 - 0.8 * d, -0.98, 0.98), 1.0);
-      vSrc = s;
-    }`;
-  const sceneFS = `
-    precision highp float;
-    uniform sampler2D uImg;
-    uniform sampler2D uFill1;
-    uniform sampler2D uFill2;
-    uniform sampler2D uFill3;
-    uniform sampler2D uLab;   // R: region, G: hidden 1, B: hidden 2
-    uniform sampler2D uLab2;  // R: hidden 3
-    uniform float uId;
-    varying vec2 vSrc;
-    void main() {
-      if (vSrc.x < 0.0 || vSrc.y < 0.0 || vSrc.x > 1.0 || vSrc.y > 1.0) discard;
-      vec3 L = floor(texture2D(uLab, vSrc).rgb * 255.0 + 0.5);
-      if (L.r == uId) { gl_FragColor = vec4(texture2D(uImg, vSrc).rgb, 1.0); return; }
-      if (L.g == uId) { gl_FragColor = vec4(texture2D(uFill1, vSrc).rgb, 1.0); return; }
-      if (L.b == uId) { gl_FragColor = vec4(texture2D(uFill2, vSrc).rgb, 1.0); return; }
-      if (floor(texture2D(uLab2, vSrc).r * 255.0 + 0.5) == uId) {
-        gl_FragColor = vec4(texture2D(uFill3, vSrc).rgb, 1.0); return;
-      }
-      discard;
-    }`;
-
-  /* ---------- pass 2: copy to screen, close seams ---------- */
-  const compVS = `
-    attribute vec2 aCorner;
+  const vs = `
+    attribute vec2 aPos;
     varying vec2 vUv;
-    void main() { vUv = aCorner; gl_Position = vec4(aCorner * 2.0 - 1.0, 0.0, 1.0); }`;
-  const compFS = `
+    void main() { vUv = aPos * 0.5 + 0.5; gl_Position = vec4(aPos, 0.0, 1.0); }`;
+
+  // Parallax occlusion search: walks the depth layers from near to far and keeps the
+  // first surface the view ray hits, so near objects correctly cover what is behind them.
+  const fs = `
     precision highp float;
-    uniform sampler2D uScene;
     uniform sampler2D uImg;
-    uniform vec2 uTexel;
-    uniform vec2 uView;
+    uniform sampler2D uDepth;
+    uniform vec2 uRes;
+    uniform vec2 uImgSize;
     uniform vec2 uOffset;
     uniform float uFocus;
+    uniform float uZoom;
     varying vec2 vUv;
+    const int STEPS = 44;
+
+    float depthAt(vec2 uv) { return texture2D(uDepth, clamp(uv, 0.001, 0.999)).r; }
+
     void main() {
-      vec4 c = texture2D(uScene, vUv);
-      if (c.a > 0.5) { gl_FragColor = vec4(c.rgb, 1.0); return; }
-      // Uncovered pixel (a seam between two planes): average the covered pixels around it.
-      vec4 acc = vec4(0.0);
-      for (int r = 1; r <= 4; r++) {
-        float fr = float(r);
-        for (int i = 0; i < 8; i++) {
-          float a = float(i) * 0.785398;
-          vec4 t = texture2D(uScene, vUv + vec2(cos(a), sin(a)) * fr * uTexel);
-          acc += vec4(t.rgb * t.a, t.a);
+      float ra = uRes.x / uRes.y;
+      float ri = uImgSize.x / uImgSize.y;
+      vec2 s = ra > ri ? vec2(1.0, ri / ra) : vec2(ra / ri, 1.0);
+      vec2 uv = (vUv - 0.5) * s / uZoom + 0.5;
+
+      float stepL = 1.0 / float(STEPS);
+      vec2 prevUv = uv - uOffset * (1.0 - uFocus);
+      float prevL = 1.0;
+      float prevD = depthAt(prevUv);
+      vec2 hit = uv + uOffset * uFocus;
+
+      for (int i = 0; i <= STEPS; i++) {
+        float L = 1.0 - float(i) * stepL;
+        vec2 c = uv - uOffset * (L - uFocus);
+        float d = depthAt(c);
+        if (d >= L) {
+          if (i == 0) { hit = c; }
+          else {
+            float a = prevD - prevL;
+            float b = d - L;
+            hit = mix(prevUv, c, clamp(a / (a - b), 0.0, 1.0));
+          }
+          break;
         }
-        if (acc.a > 0.0) break;
+        prevUv = c; prevL = L; prevD = d;
       }
-      if (acc.a > 0.0) { gl_FragColor = vec4(acc.rgb / acc.a, 1.0); return; }
-      // Larger gap (should not happen): the photo on the far plane.
-      vec2 scr = vec2(vUv.x, 1.0 - vUv.y);
-      vec2 s = (scr - 0.5) / uView + 0.5 + uOffset * uFocus;
-      gl_FragColor = vec4(texture2D(uImg, clamp(s, 0.0, 1.0)).rgb, 1.0);
+      gl_FragColor = vec4(texture2D(uImg, clamp(hit, 0.0, 1.0)).rgb, 1.0);
     }`;
 
   const compile = (type, src) => {
@@ -353,99 +332,62 @@ document.getElementById("stage").setAttribute("aria-label", CONFIG.imageAlt);
     if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(sh));
     return sh;
   };
-  const link = (vsrc, fsrc) => {
-    const p = gl.createProgram();
-    gl.attachShader(p, compile(gl.VERTEX_SHADER, vsrc));
-    gl.attachShader(p, compile(gl.FRAGMENT_SHADER, fsrc));
-    gl.bindAttribLocation(p, 0, "aCorner");
-    gl.linkProgram(p);
-    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p));
-    return p;
-  };
 
-  let sceneProg, compProg;
+  let prog;
   try {
-    sceneProg = link(sceneVS, sceneFS);
-    compProg = link(compVS, compFS);
+    prog = gl.createProgram();
+    gl.attachShader(prog, compile(gl.VERTEX_SHADER, vs));
+    gl.attachShader(prog, compile(gl.FRAGMENT_SHADER, fs));
+    gl.linkProgram(prog);
+    if (!gl.getProgramParameter(prog, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(prog));
   } catch (err) { console.error(err); showFallback(); return; }
+  gl.useProgram(prog);
 
   const buf = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, buf);
-  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([0, 0, 1, 0, 0, 1, 1, 1]), gl.STATIC_DRAW);
-  gl.enableVertexAttribArray(0);
-  gl.vertexAttribPointer(0, 2, gl.FLOAT, false, 0, 0);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1, -1, 1, -1, -1, 1, 1, 1]), gl.STATIC_DRAW);
+  const aPos = gl.getAttribLocation(prog, "aPos");
+  gl.enableVertexAttribArray(aPos);
+  gl.vertexAttribPointer(aPos, 2, gl.FLOAT, false, 0, 0);
 
-  const uniforms = (p, names) => Object.fromEntries(names.map((n) => [n, gl.getUniformLocation(p, n)]));
-  const su = uniforms(sceneProg, ["uBox", "uPlane", "uOffset", "uFocus", "uView", "uId",
-    "uImg", "uFill1", "uFill2", "uFill3", "uLab", "uLab2"]);
-  const cu = uniforms(compProg, ["uScene", "uImg", "uTexel", "uView", "uOffset", "uFocus"]);
+  const U = (n) => gl.getUniformLocation(prog, n);
+  const u = {
+    img: U("uImg"), depth: U("uDepth"), res: U("uRes"), imgSize: U("uImgSize"),
+    offset: U("uOffset"), focus: U("uFocus"), zoom: U("uZoom")
+  };
 
-  // Colour textures are filtered; label textures must be read exactly (no filtering, no colour
-  // management), otherwise region ids blend at borders.
-  gl.pixelStorei(gl.UNPACK_COLORSPACE_CONVERSION_WEBGL, gl.NONE);
-  gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
-  const makeTex = (unit, im, exact) => {
+  const makeTex = (unit, im) => {
     const t = gl.createTexture();
     gl.activeTexture(gl.TEXTURE0 + unit);
     gl.bindTexture(gl.TEXTURE_2D, t);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGB, gl.RGB, gl.UNSIGNED_BYTE, im);
-    const f = exact ? gl.NEAREST : gl.LINEAR;
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, f);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, f);
+    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, im);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
     gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     return t;
   };
 
-  // Offscreen target for pass 1 (colour + depth), resized with the canvas.
-  const SCENE_UNIT = 6;
-  const fbo = gl.createFramebuffer();
-  const fboTex = gl.createTexture();
-  const fboDepth = gl.createRenderbuffer();
-  let fboW = 0, fboH = 0;
-  const sizeTarget = (w, h) => {
-    if (w === fboW && h === fboH) return true;
-    fboW = w; fboH = h;
-    gl.activeTexture(gl.TEXTURE0 + SCENE_UNIT);
-    gl.bindTexture(gl.TEXTURE_2D, fboTex);
-    gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, w, h, 0, gl.RGBA, gl.UNSIGNED_BYTE, null);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, gl.CLAMP_TO_EDGE);
-    gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
-    gl.bindRenderbuffer(gl.RENDERBUFFER, fboDepth);
-    gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, w, h);
-    gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-    gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, fboTex, 0);
-    gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, fboDepth);
-    const ok = gl.checkFramebufferStatus(gl.FRAMEBUFFER) === gl.FRAMEBUFFER_COMPLETE;
-    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-    return ok;
-  };
-
-  const loadImg = (src) => new Promise((res, rej) => {
-    const im = new Image();
-    im.onload = () => res(im);
-    im.onerror = () => rej(new Error("Could not load " + src));
-    im.src = src;
-  });
-
   const strength = CONFIG.strength * (reduced ? 0.5 : 1);
-  // Zoom in just enough that the shifted picture never reveals its edges.
+  // Zoom in just enough that the shifted image never reveals its edges.
   const zoom = 1 + strength * 1.35;
 
   const resize = () => {
-    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    const dpr = Math.min(window.devicePixelRatio || 1, 1.5);
     const w = Math.round(canvas.clientWidth * dpr);
     const h = Math.round(canvas.clientHeight * dpr);
-    if (canvas.width !== w || canvas.height !== h) { canvas.width = w; canvas.height = h; }
-    return sizeTarget(canvas.width, canvas.height);
+    if (canvas.width !== w || canvas.height !== h) {
+      canvas.width = w; canvas.height = h;
+      gl.viewport(0, 0, w, h);
+    }
   };
 
   /* Pointer: position on screen maps to the viewer's eye position in front of the window. */
   const target = { x: 0, y: 0 };
   const cur = { x: 0, y: 0 };
   let lastInput = -1e9;
+
   const fromEvent = (e) => {
     target.x = (e.clientX / window.innerWidth) * 2 - 1;
     target.y = (e.clientY / window.innerHeight) * 2 - 1;
@@ -456,29 +398,14 @@ document.getElementById("stage").setAttribute("aria-label", CONFIG.imageAlt);
   document.addEventListener("pointerleave", () => { target.x = 0; target.y = 0; });
   window.addEventListener("blur", () => { target.x = 0; target.y = 0; });
 
-  const files = ["image.jpg", "fill1.jpg", "fill2.jpg", "fill3.jpg", "labels.png", "labels2.png"];
-  Promise.all([
-    fetch(base + "layers.json").then((r) => { if (!r.ok) throw new Error("Could not load layers.json"); return r.json(); }),
-    ...files.map((f) => loadImg(base + f))
-  ]).then(([scene, img, f1, f2, f3, lab, lab2]) => {
-    makeTex(0, img, false);
-    makeTex(1, f1, false);
-    makeTex(2, f2, false);
-    makeTex(3, f3, false);
-    makeTex(4, lab, true);
-    makeTex(5, lab2, true);
-
-    gl.useProgram(sceneProg);
-    ["uImg", "uFill1", "uFill2", "uFill3", "uLab", "uLab2"].forEach((n, i) => gl.uniform1i(su[n], i));
-    gl.uniform1f(su.uFocus, CONFIG.focus);
-    gl.useProgram(compProg);
-    gl.uniform1i(cu.uScene, SCENE_UNIT);
-    gl.uniform1i(cu.uImg, 0);
-    gl.uniform1f(cu.uFocus, CONFIG.focus);
-
-    const regions = scene.regions;       // [a, b, c, u0, v0, u1, v1]
-    const aspect = scene.width / scene.height;
-    if (!resize()) throw new Error("Offscreen buffer not supported");
+  Promise.all([loadImg(CONFIG.image), loadImg(CONFIG.depth)]).then(([im, dm]) => {
+    makeTex(0, im);
+    makeTex(1, dm);
+    gl.uniform1i(u.img, 0);
+    gl.uniform1i(u.depth, 1);
+    gl.uniform2f(u.imgSize, im.naturalWidth, im.naturalHeight);
+    gl.uniform1f(u.focus, CONFIG.focus);
+    gl.uniform1f(u.zoom, zoom);
 
     let prev = performance.now();
     const frame = (now) => {
@@ -491,45 +418,15 @@ document.getElementById("stage").setAttribute("aria-label", CONFIG.imageAlt);
         tx = Math.sin(t * 0.23) * 0.45;
         ty = Math.sin(t * 0.17 + 1.3) * 0.25;
       }
-      // Exponential easing: smooth, no overshoot.
+      // Critically-damped style easing: smooth, no overshoot.
       const k = 1 - Math.exp(-dt * 4.2);
       cur.x += (tx - cur.x) * k;
       cur.y += (ty - cur.y) * k;
 
       resize();
-      const ra = canvas.width / canvas.height;
-      const vx = zoom / (ra > aspect ? 1 : ra / aspect);
-      const vy = zoom / (ra > aspect ? aspect / ra : 1);
+      gl.uniform2f(u.res, canvas.width, canvas.height);
       // Eye moves right -> near objects slide left, far landscape slides right.
-      const ox = -cur.x * strength;
-      const oy = -cur.y * strength * CONFIG.verticalRatio;
-
-      // pass 1
-      gl.bindFramebuffer(gl.FRAMEBUFFER, fbo);
-      gl.viewport(0, 0, fboW, fboH);
-      gl.enable(gl.DEPTH_TEST);
-      gl.depthFunc(gl.LESS);
-      gl.clearColor(0, 0, 0, 0);
-      gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-      gl.useProgram(sceneProg);
-      gl.uniform2f(su.uView, vx, vy);
-      gl.uniform2f(su.uOffset, ox, oy);
-      for (let i = 0; i < regions.length; i++) {
-        const r = regions[i];
-        gl.uniform1f(su.uId, i + 1);
-        gl.uniform3f(su.uPlane, r[0], r[1], r[2]);
-        gl.uniform4f(su.uBox, r[3], r[4], r[5], r[6]);
-        gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
-      }
-
-      // pass 2
-      gl.bindFramebuffer(gl.FRAMEBUFFER, null);
-      gl.viewport(0, 0, canvas.width, canvas.height);
-      gl.disable(gl.DEPTH_TEST);
-      gl.useProgram(compProg);
-      gl.uniform2f(cu.uTexel, 1 / fboW, 1 / fboH);
-      gl.uniform2f(cu.uView, vx, vy);
-      gl.uniform2f(cu.uOffset, ox, oy);
+      gl.uniform2f(u.offset, -cur.x * strength, cur.y * strength * CONFIG.verticalRatio);
       gl.drawArrays(gl.TRIANGLE_STRIP, 0, 4);
       requestAnimationFrame(frame);
     };
@@ -540,7 +437,7 @@ document.getElementById("stage").setAttribute("aria-label", CONFIG.imageAlt);
     });
   }).catch((err) => {
     console.error(err);
-    showFallback();
+    loading.textContent = "Image could not be loaded";
   });
 })();
 </script>
