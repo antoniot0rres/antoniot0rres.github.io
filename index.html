@@ -7,18 +7,18 @@
 <title>António Torres</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Newsreader:opsz,wght@6..72,400;6..72,500&family=Hanken+Grotesk:wght@400;500&display=swap">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bodoni+Moda:ital,opsz,wght@0,6..96,500;1,6..96,500;1,6..96,700&family=Hanken+Grotesk:wght@400;500&display=swap">
 <style>
   /* Layout: one full-bleed photograph as a "window"; name and menu sit quietly on a thin top scrim. */
   :root {
     --bg: #0e0f0d;
     --ink: #f4f3ef;
     --ink-dim: rgba(244, 243, 239, 0.72);
-    --scrim: rgba(10, 11, 9, 0.38);
+    --scrim: rgba(10, 11, 9, 0.44);
     --panel: rgba(14, 15, 13, 0.58);
     --line: rgba(244, 243, 239, 0.22);
     --icon: rgba(226, 225, 220, 0.82);
-    --f-name: "Newsreader", "Iowan Old Style", Georgia, serif;
+    --f-name: "Bodoni Moda", "Didot", "Bodoni 72", Georgia, serif;
     --f-ui: "Hanken Grotesk", "Helvetica Neue", Arial, sans-serif;
     --gutter: clamp(16px, 3vw, 36px);
     color-scheme: dark;
@@ -64,9 +64,10 @@
   .name {
     margin: 0;
     font-family: var(--f-name);
-    font-weight: 400;
-    font-size: clamp(1.25rem, 1rem + 0.9vw, 1.6rem);
-    letter-spacing: 0.005em;
+    font-style: italic;
+    font-weight: 700;
+    font-size: clamp(1.4rem, 1.1rem + 1vw, 1.85rem);
+    letter-spacing: -0.01em;
     line-height: 1.1;
   }
 
@@ -109,6 +110,12 @@
     border-bottom: 1px solid transparent;
     transition: color 200ms ease, border-color 200ms ease;
   }
+  /* About: Bodoni Moda spaced capitals */
+  nav button {
+    font: 500 0.78rem/1 var(--f-name);
+    letter-spacing: 0.22em;
+    color: var(--ink);
+  }
   nav a:hover, nav button:hover, nav button[aria-expanded="true"] {
     color: var(--ink); border-bottom-color: var(--line);
   }
@@ -131,14 +138,15 @@
   }
   #about h2 {
     margin: 0;
-    font: 500 0.7rem/1 var(--f-ui);
-    letter-spacing: 0.14em; text-transform: uppercase;
-    color: var(--ink-dim);
+    font: 500 0.74rem/1 var(--f-name);
+    letter-spacing: 0.24em; text-transform: uppercase;
+    color: var(--ink);
   }
   #about p {
     margin: 0;
     font-family: var(--f-name);
-    font-size: 1.05rem; line-height: 1.5;
+    font-style: italic; font-weight: 500;
+    font-size: 1.1rem; line-height: 1.45;
     text-wrap: pretty;
   }
   .close {
@@ -176,7 +184,7 @@
   }
 
   @media (max-width: 480px) {
-    nav a, nav button { font-size: 0.7rem; letter-spacing: 0.1em; }
+    nav a, nav button { font-size: 0.72rem; letter-spacing: 0.16em; }
   }
 </style>
 </head>
