@@ -23,7 +23,9 @@
     --gutter: clamp(16px, 3vw, 36px);
     color-scheme: dark;
   }
-  html, body { height: 100%; }
+  /* "hidden" must always win over component display rules (e.g. #about uses display: grid). */
+  [hidden] { display: none !important; }
+  html, body { height: 100%; margin: 0; }
   body {
     background: var(--bg);
     color: var(--ink);
